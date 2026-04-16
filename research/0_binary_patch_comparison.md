@@ -305,3 +305,7 @@
   - removed ad-hoc `git clone` source fetching from `scripts/setup_tools.sh` and `scripts/setup_libimobiledevice.sh`.
   - added pinned git-submodule sources under `scripts/repos/` for: `trustcache`, `insert_dylib`, `libplist`, `libimobiledevice-glue`, `libusbmuxd`, `libtatsu`, `libimobiledevice`, `libirecovery`, `idevicerestore`.
   - setup scripts now initialize required submodules via `git submodule update --init --recursive <path>` and stage build copies under local tool build directories.
+- 2026-04-16 host clipboard bridge sync update:
+  - migrated `scripts/vphone_clipboard_to_guest.sh` from the sibling repo so a host shell can push UTF-8 clipboard text into a running guest through `.vphone-clipboard.sock`.
+  - added `VPhoneClipboardBridgeServer` to expose the local Unix socket bridge beside each VM config directory.
+  - added `VPhoneClipboardAutoSync` and wired it into `VPhoneAppDelegate` so host clipboard polling starts only when the guest advertises the `clipboard` capability and stops on disconnect/termination.

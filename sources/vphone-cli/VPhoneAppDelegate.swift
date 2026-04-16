@@ -6,6 +6,8 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
     private let cli: VPhoneBootCLI
     private var vm: VPhoneVirtualMachine?
     private var control: VPhoneControl?
+    private var clipboardBridge: VPhoneClipboardBridgeServer?
+    private var clipboardAutoSync: VPhoneClipboardAutoSync?
     private var windowController: VPhoneWindowController?
     private var menuController: VPhoneMenuController?
     private var fileWindowController: VPhoneFileWindowController?
@@ -85,6 +87,14 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
                 control.guestBinaryURL = vphonedURL
             }
 
+            let bridgeSocketURL = options.configURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(".vphone-clipboard.sock")
+            let clipboardBridge = VPhoneClipboardBridgeServer(socketURL: bridgeSocketURL, control: control)
+            try clipboardBridge.start()
+            self.clipboardBridge = clipboardBridge
+            self.clipboardAutoSync = VPhoneClipboardAutoSync(control: control)
+
             let provider = VPhoneLocationProvider(control: control)
             locationProvider = provider
 
@@ -153,13 +163,15 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
             hostControl = hc
 
             // Wire location toggle through onConnect/onDisconnect
-            control.onConnect = { [weak mc, weak provider = locationProvider] caps in
+            control.onConnect = { [weak self, weak mc, weak provider = locationProvider] caps in
                 mc?.updateConnectAvailability(available: true)
                 mc?.updateInstallAvailability(available: caps.contains("ipa_install"))
                 mc?.updateAppsAvailability(available: caps.contains("apps"))
                 mc?.updateURLAvailability(available: caps.contains("url"))
                 mc?.updateClipboardAvailability(available: caps.contains("clipboard"))
                 mc?.updateSettingsAvailability(available: true)
+                if caps.contains("clipboard") { self?.clipboardAutoSync?.start() }
+                else { self?.clipboardAutoSync?.stop() }
                 if caps.contains("location") {
                     mc?.updateLocationCapability(available: true)
                     // Auto-resume if user had toggle on
@@ -175,20 +187,23 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
                     await self?.installPackageIfRequested(caps: caps)
                 }
             }
-            control.onDisconnect = { [weak mc, weak provider = locationProvider] in
+            control.onDisconnect = { [weak self, weak mc, weak provider = locationProvider] in
                 mc?.updateConnectAvailability(available: false)
                 mc?.updateInstallAvailability(available: false)
                 mc?.updateAppsAvailability(available: false)
                 mc?.updateURLAvailability(available: false)
                 mc?.updateClipboardAvailability(available: false)
                 mc?.updateSettingsAvailability(available: false)
+                self?.clipboardAutoSync?.stop()
                 provider?.stopReplay()
                 provider?.stopForwarding()
                 mc?.updateLocationCapability(available: false)
             }
         } else if !cli.dfu {
             // Headless mode: auto-start location as before (no menu exists)
-            control.onConnect = { [weak provider = locationProvider] caps in
+            control.onConnect = { [weak self, weak provider = locationProvider] caps in
+                if caps.contains("clipboard") { self?.clipboardAutoSync?.start() }
+                else { self?.clipboardAutoSync?.stop() }
                 if caps.contains("location") {
                     provider?.startForwarding()
                 } else {
@@ -198,7 +213,8 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
                     await self?.installPackageIfRequested(caps: caps)
                 }
             }
-            control.onDisconnect = { [weak provider = locationProvider] in
+            control.onDisconnect = { [weak self, weak provider = locationProvider] in
+                self?.clipboardAutoSync?.stop()
                 provider?.stopReplay()
                 provider?.stopForwarding()
             }
@@ -242,6 +258,8 @@ class VPhoneAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_: Notification) {
+        clipboardAutoSync?.stop()
+        clipboardBridge?.stop()
         hostControl?.stop()
     }
 
